@@ -1,0 +1,21 @@
+name: Ensure NuGet Source
+author: Fabricio Zimmerer Murta
+description: |-
+  Ensures NuGet set up source in runner environment is correct and enabled
+inputs:
+  name:
+    description: |-
+      The name to use/update for the source. Defaults to 'nuget.org'.
+    required: false
+  url:
+    description: |-
+      The URL to the source. Defaults to 'https://api.nuget.org/v3/index.json'.
+    required: false
+runs:
+  using: "composite"
+  steps:
+    - run: "${GITHUB_ACTION_PATH}/ensuresource.sh"
+      shell: bash
+      env:
+        INPUT_SOURCE_NAME: ${{ inputs.name }}
+        INPUT_SOURCE_URL: ${{ inputs.url }}

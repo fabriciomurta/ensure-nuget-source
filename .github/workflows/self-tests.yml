@@ -1,0 +1,137 @@
+name: Self tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        runs-on: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.runs-on }}
+
+    steps:
+      - name: Miscellaneous - Checkout
+        uses: actions/checkout@v2
+
+      - name: Miscellaneous - Set an unique name for temporary source name
+        shell: bash
+        id: globals
+        run: |
+          echo "::set-output name=unique-source-name::Workflow ${{ github.run_id }}_${{ github.run_number }}"
+          echo "::set-output name=default-source-name::nuget.org"
+          echo "::set-output name=default-source-url::https://api.nuget.org/v3/index.json"
+          echo "::set-output name=fake-url::https://something-else.net/"
+          echo "::set-output name=unique-source-name-re::Workflow ${{ github.run_id }}_${{ github.run_number }}"
+          echo "::set-output name=default-source-name-re::nuget\.org"
+          echo "::set-output name=default-source-url-re::https:\/\/api\.nuget\.org\/v3\/index\.json"
+          echo "::set-output name=fake-url-re::https:\/\/something-else\.net\/"
+
+      # If there's only one package source set up, the tests will fail later on because removing it
+      # reverts the list to the default. So here we add a second package source if there's only one.
+      - name: Miscellaneous - Add a placeholder package source if only one is set up
+        shell: bash
+        run: |
+          if [ "$(dotnet nuget list source 2>&1 | egrep "^ *[0-9]+\.  [^ ]" | wc -l)" -lt 2 ]; then
+           dotnet nuget add source '${{ steps.globals.outputs.fake-url-re }}_placeholder' --name '${{ steps.globals.outputs.unique-source-name-re }} temp placeholder'
+          fi
+
+      - name: Assert - Default source is enabled and valid
+        shell: bash
+        run: dotnet nuget list source | egrep -A1 '^ *[0-9]+\.  ${{ steps.globals.outputs.default-source-name-re }} \[Enabled\].?$' | tail -n1 | egrep -q '^ +${{ steps.globals.outputs.default-source-url-re }}.?$'
+
+      - name: Test 1 - Basic run to check public NuGet source
+        uses: ./
+
+      - name: Assert 1 - Default source is still enabled and valid
+        shell: bash
+        run: dotnet nuget list source | egrep -A1 '^ *[0-9]+\.  ${{ steps.globals.outputs.default-source-name-re }} \[Enabled\].?$' | tail -n1 | egrep -q '^ +${{ steps.globals.outputs.default-source-url-re }}.?$'
+
+      - name: Prepare 2 - disable default source
+        run: dotnet nuget disable source '${{ steps.globals.outputs.default-source-name }}'
+
+      - name: Test 2 - Re-enable source
+        uses: ./
+
+      - name: Assert 2 - Default source is enabled
+        shell: bash
+        run: dotnet nuget list source | egrep -q '^ *[0-9]+\.  ${{ steps.globals.outputs.default-source-name-re }} \[Enabled\].?$'
+
+      - name: Prepare 3 - Add correct source url to a different name
+        run: |
+          dotnet nuget remove source "${{ steps.globals.outputs.default-source-name }}"
+          dotnet nuget add source "${{ steps.globals.outputs.default-source-url }}" --name "${{ steps.globals.outputs.unique-source-name }}"
+
+      - name: Test 3 - Check when the source url is under a different name
+        uses: ./
+
+      - name: Assert 3 - Custom source is set to the default url
+        shell: bash
+        run: |
+          dotnet nuget list source | egrep -A1 '^ *[0-9]+\.  ${{ steps.globals.outputs.unique-source-name-re }} \[Enabled\].?$' | tail -n1 | egrep -q '^ +${{ steps.globals.outputs.default-source-url-re }}.?$'
+
+      - name: Prepare 4 - Change source url in custom name
+        run: dotnet nuget update source "${{ steps.globals.outputs.unique-source-name }}" --source "${{ steps.globals.outputs.fake-url }}"
+
+      - name: Test 4 - Add back default source name and url
+        uses: ./
+
+      - name: Assert 4 - Custom name + changed source are intact and default name/url are created
+        shell: bash
+        run: |
+          dotnet nuget list source | egrep -A1 '^ *[0-9]+\.  ${{ steps.globals.outputs.default-source-name-re }} \[Enabled\].?$' | tail -n1 | egrep -q '^ +${{ steps.globals.outputs.default-source-url-re }}.?$'
+          dotnet nuget list source | egrep -A1 '^ *[0-9]+\.  ${{ steps.globals.outputs.unique-source-name-re }} \[Enabled\].?$' | tail -n1 | egrep -q '^ +${{ steps.globals.outputs.fake-url-re }}.?$'
+
+      - name: Miscellaneous - Remove Custom source (cleanup)
+        run: dotnet nuget remove source "${{ steps.globals.outputs.unique-source-name }}"
+
+      # At this point, the source should again be 'nuget.org=https://api.nuget.org/v3/index.json'
+      - name: Checkpoint - Default source is enabled and valid
+        shell: bash
+        run: dotnet nuget list source | egrep -A1 '^ *[0-9]+\.  ${{ steps.globals.outputs.default-source-name-re }} \[Enabled\].?$' | tail -n1 | egrep -q '^ +${{ steps.globals.outputs.default-source-url-re }}.?$'
+
+      - name: Prepare 6 - Change default source's url to something else
+        run: dotnet nuget update source '${{ steps.globals.outputs.default-source-name }}' --source "${{ steps.globals.outputs.fake-url }}"
+
+      - name: Test 6 - Update default source back to default url
+        uses: ./
+
+      - name: Assert 6 - Default source is back to default url
+        shell: bash
+        run: dotnet nuget list source | egrep -A1 '^ *[0-9]+\.  ${{ steps.globals.outputs.default-source-name-re }} \[Enabled\].?$' | tail -n1 | egrep -q '^ +${{ steps.globals.outputs.default-source-url-re }}.?$'
+
+      - name: Test 7 - Set the default source to a new url
+        uses: ./
+        with:
+          url: ${{ steps.globals.outputs.fake-url }}
+
+      - name: Assert 7 - Default source is updated with the specified url
+        shell: bash
+        run: dotnet nuget list source | egrep -A1 '^ *[0-9]+\.  ${{ steps.globals.outputs.default-source-name-re }} \[Enabled\].?$' | tail -n1 | egrep -q '^ +${{ steps.globals.outputs.fake-url-re }}.?$'
+
+      - name: Prepare 8 - Revert default source name
+        uses: ./
+
+      - name: Test 8 - Set specific source name to specific destination
+        uses: ./
+        with:
+          name: ${{ steps.globals.outputs.unique-source-name }}
+          url: ${{ steps.globals.outputs.fake-url }}
+
+      - name: Assert 8 - New source is set with the specified url
+        shell: bash
+        run: dotnet nuget list source | egrep -A1 '^ *[0-9]+\.  ${{ steps.globals.outputs.unique-source-name-re }} \[Enabled\].?$' | tail -n1 | egrep -q '^ +${{ steps.globals.outputs.fake-url-re }}.?$'
+
+      - name: Test 9 - Ignore source name if specific url already exists
+        uses: ./
+        with:
+          name: ${{ steps.globals.outputs.unique-source-name }}_different
+          url: ${{ steps.globals.outputs.fake-url }}
+
+      - name: Assert 9 - Created source is still set with the specified url from test 8
+        shell: bash
+        run: dotnet nuget list source | egrep -A1 '^ *[0-9]+\.  ${{ steps.globals.outputs.unique-source-name-re }} \[Enabled\].?$' | tail -n1 | egrep -q '^ +${{ steps.globals.outputs.fake-url-re }}.?$'

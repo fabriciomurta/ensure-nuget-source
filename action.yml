@@ -1,5 +1,10 @@
 name: Ensure NuGet Source
 author: Fabricio Zimmerer Murta
+
+branding:
+  color: purple
+  icon: check-square
+
 description: |-
   Ensures NuGet set up source in runner environment is correct and enabled
 inputs:
